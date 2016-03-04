@@ -19,7 +19,7 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
+* :doc:`requirements`
+* :doc:`design`
+* :doc:`architecture`
 
-requirements
-design
-architecture
