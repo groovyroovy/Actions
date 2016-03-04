@@ -4,3 +4,5 @@ Nose
 Flask-SQLAlchemy
 
 Flask-WTF
+
+Sphinx
