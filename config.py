@@ -9,7 +9,7 @@ project_name = "actions"
 # base config class; extend it to your needs.
 class Config(object):
     # use DEBUG mode?
-    DEBUG = True
+    DEBUG = False
 
     # use TESTING mode?
     TESTING = False
