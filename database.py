@@ -28,20 +28,3 @@ def remove_session():
     db.session.remove()
 
 #--- SQLALCHEMY SUPPORT END
-
-
-from sqlalchemy import event
-
-@event.listens_for(db_session, 'before_flush')
-def caught_sess_event(session):
-    if session.deleted:
-        print session.deleted
-    if session.new:
-        print session.new
-    if session.dirty:
-        print session.dirty
-    import pdb
-    pdb.set_trace()
-
-
-
