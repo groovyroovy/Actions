@@ -1,3 +1,4 @@
+from blinker import signal
 import flask
 from exceptions import ValueError
 
@@ -10,6 +11,16 @@ from database import db
 
 
 event_registry = {}
+
+def db_event_pitcher(sender, **kw):
+    """Dispatches databse events to be processed
+    act_obj must have an execute method
+    """
+    import 
+    if obj:
+        obj.execute(obj, kw)
+    else:
+        print('no object named obj')
 
 
 def db_event(session, stat, instances):
@@ -24,11 +35,11 @@ def db_event(session, stat, instances):
             import pdb
             pdb.set_trace()
             evt_name =  obj.__tablename__
-            model_name = '%s%s' % (evt_cat, evt_name)
+            model_name = '%s:%s' % (evt_cat, evt_name)
             specific = '%s:%s:%s' % (evt_cat, evt_name, evt_type)
 
             key_combo = set([evt_cat, model_name, specific])
-            registey_keys = set(event_registry.keys())
+            registry_keys = set(event_registry.keys())
             outcomes = list(key_combo & registry_keys)
 
             for kk in outcomes:
@@ -77,6 +88,8 @@ class ActionManager(object):
 
         self.session = session if session else db_session
         self.db = db
+        self.db_action_signal = signal('action_signal')
+        self.db_action_signal.connect(db_event_pitcher)
 
         event.listen(self.session, 'before_flush', db_event)
 
@@ -108,7 +121,7 @@ class ActionManager(object):
                     (action.event_type, k, str(valid_event_types))
             k = k + ':' + action.event_type
 
-        event_registry.setdefault(k, []).append({'action':action})
+        event_registry.setdefault(k, []).append(action)
 
 
     def unregister(self, action):
@@ -119,6 +132,8 @@ class Action(object):
     """Base class for actions.
     Events are database, cron, or application specified.
     For database events, names are the model name, and type is dirty, new, or deleted.
+
+    default: database
     """
     name = 'Action'
     description = 'Base Action class for database events.'
@@ -127,25 +142,87 @@ class Action(object):
         self.event_category = cat if cat else ""
         self.event_name = name if cat and name else ""
         self.event_type = event_type if cat and name and event_type else ""
-        
+
 
     def verify(self, obj, evt_type):
         """Validate event. 
-        Returning  means the event is a don't care. 
+        Returning False means the event is a don't care. 
         Otherwise, returning True (default)  validates the object.
+        It can then be either executed directly or by returning True,
+        it will be dispatched via a signal.
+
+        Override this method so further test the that the action should be
+        executed.
         """
         return True
+    
 
 
     def dispatch(self, obj, **kwargs):
         """Enqueue the object for a signal. 
         False return means nothing enqueued.
         """
+        pitcher = signal('action_signal')
+        print('sending signal with kwargs=%s' % (kwargs))
+        pitcher.send(self, kwargs)
         import pdb
         pdb.set_trace()
-        return False
 
-    def execute(self, obj, kwargs):
+    def execute(self, obj, *kwargs):
         "execute the action"
         return
 
+
+class EmailAction(Action):
+    from flask_mail import Attachment, Connection, Message, Mail
+
+    def __init__(self, *args, **kwargs):
+        Action.__init__(self, *args)
+
+        self.kwargs = kwargs
+        
+        
+    def subject(self, **kwargs):
+        """
+        Email subject string.
+        Override to provide object's subject
+        """
+        return self.description
+    
+    
+    def recipients(self, **kwargs):
+        """
+        Recipients list
+        """
+        return ['reuven@koblick.com']
+
+    def cc(self, **kwargs):
+        return []
+
+    def bcc(self, **kwargs):
+
+    def text_body(self, **kwargs):
+        return ""
+
+    def attachments(self, **kwargs):
+        """
+        Attachment list expects a list of tuples with:
+            filename,
+            content_type,  (mime_type)
+            data,
+        """
+
+    def reply_to(self, **kwargs):
+        return None
+
+    def charset(self, **kwargs):
+        return None
+
+
+    def execute(self, **kwargs):
+        """
+        Send email message
+        """
+        ### 
+        msg = Message()
+        

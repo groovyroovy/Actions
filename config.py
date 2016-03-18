@@ -44,7 +44,7 @@ class Config(object):
     MAIL_DEBUG = False
     MAIL_USERNAME = None
     MAIL_PASSWORD = None
-    DEFAULT_MAIL_SENDER = "example@%s.com" % project_name
+    DEFAULT_MAIL_SENDER = "reuven@koblick.com"
 
     LOAD_MODULES_EXTENSIONS = ['views', 'models']
 
