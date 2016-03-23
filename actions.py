@@ -1,16 +1,19 @@
 from blinker import signal
 import flask
+from flask import current_app
 from exceptions import ValueError
 
 from sqlalchemy import event
 from sqlalchemy.engine import reflection
 
-# db_session and db should be passed to ActionManager on initialization.
+# db_session and db should be passed to ActionManager when initiating.
+# These imports are backups.
 from database import db_session
 from database import db
 
 
 event_registry = {}
+
 
 def db_event_pitcher(sender, **kw):
     """Dispatches databse events to be processed
@@ -70,8 +73,6 @@ def db_event(session, stat, instances):
 
 
 
-
-
 def db_rollback(session):
     print 'rolled back'
 
@@ -83,8 +84,8 @@ class ActionManager(object):
     """
     name = 'Action Manager'
     description = 'Base Action Manager'
-    
-    def __init__(self, session=None):
+
+    def __init__(self, app=current_app, session=db_session):
 
         self.session = session if session else db_session
         self.db = db
@@ -98,7 +99,14 @@ class ActionManager(object):
         
     def register_db_event(self, action):
         """Registers an action's event.
-        Wild cards are permitted for tablenames and event_types.
+
+        The event is identified by category, name, and type. The 
+        Categories are: database
+        For database events:
+             name is the __tablename__ of a SqlAlchemy model.
+             event type is one of new|delete|dirty (changed)
+        
+        Wild cards are permitted for tablenames and event_types. 
         """
         valid_categories = ['database']
         valid_tablenames = reflection.Inspector.from_engine(db.engine).get_table_names()
@@ -138,10 +146,18 @@ class Action(object):
     name = 'Action'
     description = 'Base Action class for database events.'
     
-    def __init__(self, cat='database', name=None, event_type=None):
+    def __init__(self, cat='database', name=None, event_type=None **kwargs):
+        """
+        Verify_params are used by the verify method to further test the 
+        validity of an event. For example, { 'xxx': [ { name: yyy, value: zzz ] }
+        is the old value upon which the verify method will test if changed.
+        """
+
         self.event_category = cat if cat else ""
         self.event_name = name if cat and name else ""
         self.event_type = event_type if cat and name and event_type else ""
+        self.verify_params = getattr(kwargs, 'verify_params', None)
+
 
 
     def verify(self, obj, evt_type):
@@ -153,8 +169,22 @@ class Action(object):
 
         Override this method so further test the that the action should be
         executed.
+
+        For dirty (changed) records, original values are set on initialization
+        of the form: { tablename: [ {field: name, value: val}, ... ] }
         """
-        return True
+        if self.value_params:
+            fields = self.value_params[obj.__table__name]
+            for field in fields:
+                name = field['name']
+                val = field['value']
+                if not hasattr(obj, name):
+                    return False
+                if getattr(obj, name) == val:
+                    continue
+                else:
+                    return False
+            return True
     
 
 
@@ -176,46 +206,82 @@ class Action(object):
 class EmailAction(Action):
     from flask_mail import Attachment, Connection, Message, Mail
 
+    log_mail = False
+
     def __init__(self, *args, **kwargs):
-        Action.__init__(self, *args)
+        """kwargs may contain email Message fields.
+
+        If a field is not provided as a parameter, that field's name, say - bcc, can
+        be derived by overidding the bcc method below or any one of the methods that
+        corresponds to a Message field.
+
+        Fields not now supported: html, extra_headers, mail_options, rcpt_options.
+        """
+        Action.__init__(self, *args, **kwargs))
 
         self.kwargs = kwargs
-        
+        for k,v in kwargs.items():
+            setattr(self, k, v)
         
     def subject(self, **kwargs):
         """
         Email subject string.
         Override to provide object's subject
         """
-        return self.description
-    
+        if hasattr(self, 'subject'):
+            return getattr(self, 'subject', None)
+        return None
     
     def recipients(self, **kwargs):
         """
         Recipients list
         """
-        return ['reuven@koblick.com']
+        if hasattr(self, 'recipients'):
+            return getattr(self, 'recipients', None)
+        return None
 
     def cc(self, **kwargs):
-        return []
+        if hasattr(self, cc.__name__):
+            return getattr(self, cc.__name__, None)
+        return None
 
     def bcc(self, **kwargs):
+        if hasattr(self, bcc.__name__):
+            return getattr(self, bcc.__name__, None)
+        return None
 
-    def text_body(self, **kwargs):
-        return ""
+    def body(self, **kwargs):
+        """
+        body is a dict: 
+            { 'text', template_data, 'context': { ... } }
+        """
+        if hasattr(self, body.__name__):
+            return render(getattr(self, body.__name__, None))
+        return None
 
     def attachments(self, **kwargs):
         """
-        Attachment list expects a list of tuples with:
-            filename,
-            content_type,  (mime_type)
-            data,
+        Attachment list expects a list of dicts with:
+            filename=filename,
+            content_type=content_type,  (mime_type)
+            data=data,
         """
+        attchs = []
+        if hasattr(self, attachments.__name__):
+            for attach in getattr(self, attachments.__name__):
+                attchs.append(Attach(attach))
+            return attchs
+        return None
 
+        
     def reply_to(self, **kwargs):
+        if hasattr(self, reply_to.__name__):
+            return getattr(self, reply_to.__name__, None)
         return None
 
     def charset(self, **kwargs):
+        if hasattr(self, charset.__name__, None):
+            return getattr(self, charset.__name__, None)
         return None
 
 
@@ -223,6 +289,39 @@ class EmailAction(Action):
         """
         Send email message
         """
-        ### 
-        msg = Message()
+        msg_args = {}
+        for func in [subject, recipients, cc, bcc, body,
+                     attachments, reply_to, charset]:
+            result = func()
+            if result:
+                msg_args[func.__name__] = result
         
+        mail = Mail()
+        # mail might already be initialized??
+        mail.init_app(current_app)
+        mail.send_message(**msg_args)
+
+        if log_mail:
+            """
+            Log email to a table with a timestamp. Note, for attachements, don't only log the
+            file name and content_type, not the data.
+            """
+            return
+
+    def render_from_text(self, ctx, environ=None):
+        """
+        ctx is { 'text', data, 'context': { ... } }
+        """
+        env = environ if environ else Environment()
+        template = env.from_string(ctx['text'])
+        return template.render(ctx['context'])
+    
+
+    def render_from_template(self, ctx, environ):
+        """
+        Mail environment must be valid in order to find the 
+        template in the file system.
+        ctx is { 'template': xxx.html, 'context': { ... } }
+        """
+        template = environ.get_templagte(ctx['template'])
+        return template.render(ctx['context'])
