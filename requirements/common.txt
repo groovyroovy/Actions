@@ -2,7 +2,4 @@ Flask
 Flask-Script
 Nose
 Flask-SQLAlchemy
-
 Flask-WTF
-
-Sphinx
