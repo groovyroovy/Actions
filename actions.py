@@ -138,6 +138,86 @@ class ActionManager(object):
         return True
 
 
+class VerifyObject(object):
+    """Base class for objects to verify.
+
+    """
+    def __init__(self, **kwargs):
+        self.verify_params = {}
+        if kwargs:
+            for k,v in kwargs.items():
+                setattr(self, k, v)
+
+
+    def load_params(tablename, fieldname, keyname, rows):
+        """
+        Load db rows into a searchable set of nested dicts:
+            { 'tablename': { 'fieldname' : { 'id': value }, ... }, ... }
+        """
+        table_level = self.verify_params.setdefault(tablename, {})
+        name_level = table_level.set_default(fieldname, {})
+        for row in rows:
+            if row.has_key(keyname):
+                print('Error adding value %s from row with key %s to table %s' \
+                            % (fieldname, keyname, tablename))
+            name_level[keyname] = getattr(row, fieldname, None)
+
+
+
+    def add_param(tablename, fieldname, keyname, row):
+        """Add a new entry to the verifiable params
+        """
+        self.load_params(tablename, fieldname, keyname, [row])
+
+
+    def delete_param(tablename, fieldname, keyname):
+                      
+        try:
+            table_level = self.verify_params[tablename]
+            name_level = table_level[fieldname]
+            name_level.pop(keyname)
+            if len(name_level) == 0:
+                table_level.pop(fieldname)
+            if len(table_level) == 0:
+                self.verify_params.pop(tablename)
+
+        except KeyError:
+            print('Error deleting value %s from row with key %s from table %s' \
+                  % (fieldname, keyname, tablename))
+            return
+
+    def update_param(tablename, fieldname, keyname, newval):
+        try:
+            table_level = self.verify_params[tablename]
+            name_level = table_level[fieldname]
+            name_level[keyname] = newval
+
+        except KeyError:
+            print('Error updating value %s in row with key %s, table %s' \
+                               % (fieldname, keyname, tablename))
+            return
+
+
+    def search_params(obj):
+        tablename = obj.__tablename__
+        table_level = self.verify_params[tablename]
+        names = table_level.keys()
+        if names:
+            for name in names:
+                name_level = table_level[name]
+                keyname = obj.id
+                if name_level.has_key(keyname):
+                    value = name_level[keynsma]
+                    if value == getattr(obj, keyname, None):
+                        return 'unchanged'
+                    else:
+                        return 'changed'
+        return 'not_found'
+                
+    
+
+
+
 class Action(object):
     """Base class for actions.
     Events are database, cron, or application specified.
@@ -150,15 +230,23 @@ class Action(object):
     
     def __init__(self, cat='database', name=None, event_type=None, **kwargs):
         """
-        Verify_params are used by the verify method to further test the 
-        validity of an event. For example, { 'xxx': [ { name: yyy, value: zzz ] }
-        is the old value upon which the verify method will test if it changed.
+        verify_params: are used by the verify method to further test the 
+        validity of an event. They are passed as:
+        tablename=xxx, fieldname=yyy, keyname=zzz, rows=[0....n]
         """
         self.event_category = cat if cat else ""
         self.event_name = name if cat and name else ""
         self.event_type = event_type if cat and name and event_type else ""
-        self.verify_params = getattr(kwargs, 'verify_params', None)
-
+        if self.kwargs:
+            for k,v in kwargs.items():
+                setattr(self, k, v)
+        self.tablename = getattr(self, 'tablename', None)
+        self.fieldname = getattr(self, 'fieldname', None)
+        self.keyname = getattr(self, 'keyname', None)
+        self.rows = getattr(self, 'rows', None)
+        if self.tablename and self.fieldname and self.keyname and self.rows:
+            self.verify_params = VerifyObject()
+            self.verify_params.load_params(tablename, fieldname, keyname, rows)
 
 
     def verify(self, obj, evt_type):
@@ -171,23 +259,19 @@ class Action(object):
         Override this method to further test the that the action should be
         executed.
 
-        For dirty (changed) records, original values are set on initialization
-        of the form: { tablename: [ {field: name, value: val}, ... ] }
+        Old record values a passed as:
+        tablename=tablename, fieldname=fieldname, keyname='id', rows=[0..n]
         """
-        if not hasattr(self, verify_params):
-            return False
-        if self.verify_params:
-            recs = self.value_params[obj.__tablename__]
-            for rec in recs:
-                field = rec['field']
-                val = rec['value']
-                if not hasattr(obj, name):
-                    return False
-                if getattr(obj, field) == val:
-                    continue
-                else:
-                    return True  # The value has changed!
-            return False
+        if hasattr(self, verify_params):
+            ret_val = self.verify_params.search_params(obj)
+            if ret_val == 'changed':
+                self.dispatch(obj, {'action': 'changed'})
+                return True
+            else:
+                """
+                probably log a info or something
+                """
+                return False
     
 
 
@@ -222,9 +306,6 @@ class EmailAction(Action):
         """
         Action.__init__(self, *args, **kwargs)
 
-        self.kwargs = kwargs
-        for k,v in kwargs.items():
-            setattr(self, k, v)
         
     def subject(self, **kwargs):
         """

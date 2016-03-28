@@ -13,7 +13,11 @@ act_mgr = ActionManager(current_app, db_session)
 
 
 email_action = EmailAction('database', 'users', 'dirty', **kw)
-email_action.verify_params = {'users': ['first_name', 'Rosalie'],}
+email
+email_action.verify_params = {'users':
+                              { 'first_name':
+                                { 'id': 0, 'value': 'Rosalie' } } }
+
 
 act_mgr.register_db_event(email_action)
 
