@@ -174,18 +174,20 @@ class Action(object):
         For dirty (changed) records, original values are set on initialization
         of the form: { tablename: [ {field: name, value: val}, ... ] }
         """
-        if self.value_params:
-            fields = self.value_params[obj.__table__name]
-            for field in fields:
-                name = field['name']
-                val = field['value']
+        if not hasattr(self, verify_params):
+            return False
+        if self.verify_params:
+            recs = self.value_params[obj.__tablename__]
+            for rec in recs:
+                field = rec['field']
+                val = rec['value']
                 if not hasattr(obj, name):
                     return False
-                if getattr(obj, name) == val:
+                if getattr(obj, field) == val:
                     continue
                 else:
-                    return False
-            return True
+                    return True  # The value has changed!
+            return False
     
 
 
