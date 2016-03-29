@@ -1,24 +1,20 @@
 from actions import ActionManager, EmailAction
 from flask import current_app
 from database import db_session
+from models import User
 
-kw = {
+act_mgr = ActionManager(current_app, db_session)
+
+msg = {
     'recipient': ('Reuven Koblick', 'reuven@koblick.com'),
     'bcc':'groovyroovy@gmail.com',
     'subject': 'Actions test',
     'body': {'text': 'This is a test.', 'context': {}} }
 
+email_action = EmailAction('database', 'users', 'dirty', **msg)
 
-act_mgr = ActionManager(current_app, db_session)
-
-
-email_action = EmailAction('database', 'users', 'dirty', **kw)
-email
-email_action.verify_params = {'users':
-                              { 'first_name':
-                                { 'id': 0, 'value': 'Rosalie' } } }
-
-
+rows = db_session.query(User).all()
+email_action.load_params('users', 'first_name', 'id', rows)
 act_mgr.register_db_event(email_action)
 
 

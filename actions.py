@@ -19,10 +19,7 @@ def db_event_pitcher(sender, **kw):
     """Dispatches databse events to be processed
     act_obj must have an execute method
     """
-    if obj:
-        obj.execute(obj, kw)
-    else:
-        print('no object named obj')
+    sender.execute(**kw)
 
 
 def db_event(session, stat, instances):
@@ -143,52 +140,50 @@ class VerifyObject(object):
 
     """
     def __init__(self, **kwargs):
-        self.verify_params = {}
+        self.lookups = {}
         if kwargs:
             for k,v in kwargs.items():
                 setattr(self, k, v)
 
 
-    def load_params(tablename, fieldname, keyname, rows):
+    def load_params(self, tablename, fieldname, keyname, rows):
         """
         Load db rows into a searchable set of nested dicts:
             { 'tablename': { 'fieldname' : { 'id': value }, ... }, ... }
         """
-        table_level = self.verify_params.setdefault(tablename, {})
-        name_level = table_level.set_default(fieldname, {})
+        table_level = self.lookups.setdefault(tablename, {})
+        name_level = table_level.setdefault(fieldname, {})
         for row in rows:
-            if row.has_key(keyname):
-                print('Error adding value %s from row with key %s to table %s' \
-                            % (fieldname, keyname, tablename))
-            name_level[keyname] = getattr(row, fieldname, None)
+            id = getattr(row, keyname, None)
+            name_level[id] = getattr(row, fieldname, None)
 
 
 
-    def add_param(tablename, fieldname, keyname, row):
+    def add_param(self, tablename, fieldname, keyname, row):
         """Add a new entry to the verifiable params
         """
         self.load_params(tablename, fieldname, keyname, [row])
 
 
-    def delete_param(tablename, fieldname, keyname):
+    def delete_param(self, tablename, fieldname, keyname):
                       
         try:
-            table_level = self.verify_params[tablename]
+            table_level = self.lookups[tablename]
             name_level = table_level[fieldname]
             name_level.pop(keyname)
             if len(name_level) == 0:
                 table_level.pop(fieldname)
             if len(table_level) == 0:
-                self.verify_params.pop(tablename)
+                self.lookups.pop(tablename)
 
         except KeyError:
             print('Error deleting value %s from row with key %s from table %s' \
                   % (fieldname, keyname, tablename))
             return
 
-    def update_param(tablename, fieldname, keyname, newval):
+    def update_param(self, tablename, fieldname, keyname, newval):
         try:
-            table_level = self.verify_params[tablename]
+            table_level = self.lookups[tablename]
             name_level = table_level[fieldname]
             name_level[keyname] = newval
 
@@ -198,24 +193,20 @@ class VerifyObject(object):
             return
 
 
-    def search_params(obj):
+    def search_params(self, obj):
         tablename = obj.__tablename__
-        table_level = self.verify_params[tablename]
-        names = table_level.keys()
-        if names:
-            for name in names:
-                name_level = table_level[name]
-                keyname = obj.id
-                if name_level.has_key(keyname):
-                    value = name_level[keynsma]
-                    if value == getattr(obj, keyname, None):
-                        return 'unchanged'
-                    else:
-                        return 'changed'
-        return 'not_found'
-                
-    
+        table_level = self.lookups[tablename]
+        name, vals = table_level.items()[0]
+        try:
+            new_val = vals[obj.id]
+            if new_val != getattr(obj, name):
+                return 'changed'
+            else:
+                return 'unchanged'
+        except KeyError:
+            return 'not found'
 
+                
 
 
 class Action(object):
@@ -230,23 +221,24 @@ class Action(object):
     
     def __init__(self, cat='database', name=None, event_type=None, **kwargs):
         """
-        verify_params: are used by the verify method to further test the 
+        verify_params (kwarg args)  are used by the verify method to further test the 
         validity of an event. They are passed as:
         tablename=xxx, fieldname=yyy, keyname=zzz, rows=[0....n]
         """
         self.event_category = cat if cat else ""
         self.event_name = name if cat and name else ""
         self.event_type = event_type if cat and name and event_type else ""
-        if self.kwargs:
+        if kwargs:
             for k,v in kwargs.items():
                 setattr(self, k, v)
-        self.tablename = getattr(self, 'tablename', None)
-        self.fieldname = getattr(self, 'fieldname', None)
-        self.keyname = getattr(self, 'keyname', None)
-        self.rows = getattr(self, 'rows', None)
-        if self.tablename and self.fieldname and self.keyname and self.rows:
-            self.verify_params = VerifyObject()
-            self.verify_params.load_params(tablename, fieldname, keyname, rows)
+        keys = kwargs.keys()
+        
+        if 'tablename' in keys and 'fieldname' in keys and 'keyname' in keys \
+           and 'rows' in keys:
+            if self.tablename and self.fieldname and self.keyname and self.rows:
+                self.lookups = VerifyObject()
+                self.lookups.load_params(self.tablename, self.fieldname,
+                                               self.keyname, self.rows)
 
 
     def verify(self, obj, evt_type):
@@ -262,16 +254,27 @@ class Action(object):
         Old record values a passed as:
         tablename=tablename, fieldname=fieldname, keyname='id', rows=[0..n]
         """
-        if hasattr(self, verify_params):
-            ret_val = self.verify_params.search_params(obj)
+        if hasattr(self, 'verify_object'):
+            ret_val = self.verify_object.search_params(obj)
             if ret_val == 'changed':
-                self.dispatch(obj, {'action': 'changed'})
                 return True
             else:
                 """
                 probably log a info or something
                 """
                 return False
+
+
+    def load_params(self, tablename, fieldname, keyname, rows):
+        """Load parameters to verify.
+        The verify parameters may also be loaded when initiating the Action object.
+        """
+        if tablename and fieldname and keyname and rows:
+            self.verify_object = VerifyObject()
+            self.verify_object.load_params(tablename, fieldname, keyname, rows)
+        else:
+            raise ValueError('Missing params')
+        return
     
 
 
@@ -279,13 +282,12 @@ class Action(object):
         """Enqueue the object for a signal. 
         False return means nothing enqueued.
         """
+        kwargs['obj'] = obj
         pitcher = signal('action_signal')
         print('sending signal with kwargs=%s' % (kwargs))
-        pitcher.send(self, kwargs)
-        import pdb
-        pdb.set_trace()
+        pitcher.send(self, **kwargs)
 
-    def execute(self, obj, *kwargs):
+    def execute(self, obj, **kwargs):
         "execute the action"
         return
 
@@ -307,7 +309,7 @@ class EmailAction(Action):
         Action.__init__(self, *args, **kwargs)
 
         
-    def subject(self, **kwargs):
+    def _subject(self, **kwargs):
         """
         Email subject string.
         Override to provide object's subject
