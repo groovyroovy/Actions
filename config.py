@@ -38,12 +38,12 @@ class Config(object):
 
     # EMAIL CONFIGURATION
     MAIL_SERVER = "localhost"
-    MAIL_PORT = 25
+    MAIL_PORT = 1025
     MAIL_USE_TLS = False
     MAIL_USE_SSL = False
-    MAIL_DEBUG = False
-    MAIL_USERNAME = None
-    MAIL_PASSWORD = None
+    MAIL_DEBUG = True
+#    MAIL_USERNAME = ""
+#    MAIL_PASSWORD = ""
     DEFAULT_MAIL_SENDER = "reuven@koblick.com"
 
     LOAD_MODULES_EXTENSIONS = ['views', 'models']

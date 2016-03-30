@@ -4,7 +4,7 @@ from flask import current_app
 
 from sqlalchemy import event
 from sqlalchemy.engine import reflection
-
+from flask_mail import Attachment, Connection, Message, Mail
 
 """# db_session and db should be passed to ActionManager when initiating.
 # These imports are backups.
@@ -293,15 +293,15 @@ class Action(object):
 
 
 class EmailAction(Action):
-    from flask_mail import Attachment, Connection, Message, Mail
+
 
     log_mail = False
 
     def __init__(self, *args, **kwargs):
         """kwargs may contain email Message fields.
 
-        If a field is not provided as a parameter, that field's name, say - bcc, can
-        be derived by overidding the bcc method below or any one of the methods that
+        If a message field is not provided as a parameter, that field's name, say - bcc, 
+        can be derived by overidding the bcc method below or any one of the methods that
         corresponds to a Message field.
 
         Fields not now supported: html, extra_headers, mail_options, rcpt_options.
@@ -309,7 +309,7 @@ class EmailAction(Action):
         Action.__init__(self, *args, **kwargs)
 
         
-    def _subject(self, **kwargs):
+    def get_subject(self, **kwargs):
         """
         Email subject string.
         Override to provide object's subject
@@ -318,7 +318,7 @@ class EmailAction(Action):
             return getattr(self, 'subject', None)
         return None
     
-    def recipients(self, **kwargs):
+    def get_recipients(self, **kwargs):
         """
         Recipients list
         """
@@ -326,26 +326,26 @@ class EmailAction(Action):
             return getattr(self, 'recipients', None)
         return None
 
-    def cc(self, **kwargs):
-        if hasattr(self, cc.__name__):
-            return getattr(self, cc.__name__, None)
+    def get_cc(self, **kwargs):
+        if hasattr(self, 'cc'):
+            return getattr(self, 'cc', None)
         return None
 
-    def bcc(self, **kwargs):
-        if hasattr(self, bcc.__name__):
-            return getattr(self, bcc.__name__, None)
+    def get_bcc(self, **kwargs):
+        if hasattr(self, 'bcc'):
+            return getattr(self, 'bcc', None)
         return None
 
-    def body(self, **kwargs):
+    def get_body(self, **kwargs):
         """
         body is a dict: 
             { 'text', template_data, 'context': { ... } }
         """
-        if hasattr(self, body.__name__):
-            return render(getattr(self, body.__name__, None))
+        if hasattr(self, 'body'):
+            return self.render_from_text(getattr(self, 'body', None))
         return None
 
-    def attachments(self, **kwargs):
+    def get_attachments(self, **kwargs):
         """
         Attachment list expects a list of dicts with:
             filename=filename,
@@ -353,21 +353,20 @@ class EmailAction(Action):
             data=data,
         """
         attchs = []
-        if hasattr(self, attachments.__name__):
-            for attach in getattr(self, attachments.__name__):
-                attchs.append(Attach(attach))
+        if hasattr(self, 'attachments'):
+            for attach in getattr(self, 'attachments'):
+                attchs.append(Attachment(attach))
             return attchs
         return None
-
         
-    def reply_to(self, **kwargs):
-        if hasattr(self, reply_to.__name__):
-            return getattr(self, reply_to.__name__, None)
+    def get_reply_to(self, **kwargs):
+        if hasattr(self, 'reply_to'):
+            return getattr(self, 'reply_to', None)
         return None
 
-    def charset(self, **kwargs):
-        if hasattr(self, charset.__name__, None):
-            return getattr(self, charset.__name__, None)
+    def get_charset(self, **kwargs):
+        if hasattr(self, 'charset'):
+            return getattr(self, 'charset', None)
         return None
 
 
@@ -375,31 +374,37 @@ class EmailAction(Action):
         """
         Send email message
         """
-        msg_args = {}
-        for func in [subject, recipients, cc, bcc, body,
-                     attachments, reply_to, charset]:
+        self.msg_args = {}
+        for func in [getattr(self, aa) for aa in dir(self) if aa.startswith('get_')]:
             result = func()
             if result:
-                msg_args[func.__name__] = result
-        
+                head, sep, tail = func.__name__.partition('_')
+                self.msg_args[tail] = result
+        self.msg_args['sender'] = current_app.config['DEFAULT_MAIL_SENDER']
         mail = Mail()
         # mail might already be initialized??
         mail.init_app(current_app)
-        mail.send_message(**msg_args)
+        import pdb
+        pdb.set_trace()
+        mail.send_message(**self.msg_args)
+
 
         if log_mail:
             """
             Log email to a table with a timestamp. Note, for attachements, don't only log the
             file name and content_type, not the data.
             """
-            return
 
-    def render_from_text(self, ctx, environ=None):
+        self.msg_args = {}
+        return
+
+    def render_from_text(self, ctx):
         """
-        ctx is { 'text', data, 'context': { ... } }
+        ctx is { 'text', 'context': { ... } }
         """
-        env = environ if environ else Environment()
-        template = env.from_string(ctx['text'])
+        from jinja2 import Template
+
+        template = Template(ctx['text'])
         return template.render(ctx['context'])
     
 
@@ -409,5 +414,5 @@ class EmailAction(Action):
         template in the file system.
         ctx is { 'template': xxx.html, 'context': { ... } }
         """
-        template = environ.get_templagte(ctx['template'])
+        template = environ.get_template(ctx['template'])
         return template.render(ctx['context'])
