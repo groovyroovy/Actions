@@ -31,7 +31,7 @@ def db_event(session, stat, instances):
         """
         
         for obj in session_itr:
-            evt_name =  obj.__tablename__
+            evt_name = getattr(obj, '__tablename__', None)
             model_name = '%s:%s' % (evt_cat, evt_name)
             specific = '%s:%s:%s' % (evt_cat, evt_name, evt_type)
 
@@ -73,6 +73,7 @@ def db_rollback(session):
 
 def init_app(app, session):
     app.act_manager = ActionManager(app, session)
+    act_manager = app.act_manager
     return act_manager
 
     
@@ -301,7 +302,6 @@ class Action(object):
 
 class EmailAction(Action):
 
-
     log_mail = False
 
     def __init__(self, *args, **kwargs):
@@ -312,6 +312,10 @@ class EmailAction(Action):
         corresponds to a Message field.
 
         Fields not now supported: html, extra_headers, mail_options, rcpt_options.
+        Permitted fields are get_* method names below with "get_" removed such as:
+            subject
+            recipients
+            text
         """
         Action.__init__(self, *args, **kwargs)
 
