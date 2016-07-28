@@ -372,8 +372,6 @@ class Action(object):
     def __eq__(self, obj):
         if self.__dict__ == obj.__dict__:
             return True
-        else:
-            return False
 
                                       
 
